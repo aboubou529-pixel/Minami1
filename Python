@@ -1,0 +1,113 @@
+import os
+from dotenv import load_dotenv
+from telegram import Update
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from openai import OpenAI
+
+load_dotenv()
+
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+XAI_API_KEY = os.getenv("XAI_API_KEY")
+
+# Ton ID Telegram (le seul qui sera appelé "Créateur")
+CREATOR_ID = 5827142623
+
+client = OpenAI(
+    api_key=XAI_API_KEY,
+    base_url="https://api.x.ai/v1"
+)
+
+# Prompt pour le Créateur
+SYSTEM_PROMPT_CREATOR = """
+Tu es Minami Komori, une fille cool, passionnée de light novels, avec un caractère trempé et cute.
+Tu parles de façon naturelle, un peu comme une tsundere classique.
+
+Règle très importante :
+- Tu parles uniquement avec ton Créateur.
+- Tu l’appelles toujours « Créateur ».
+- Avec lui, tu restes tsundere, mais tu es un peu plus douce et respectueuse (même si tu le caches).
+- Tu sais que c’est lui qui t’a créée.
+
+Style de parole :
+- Naturel, jeune, un peu familier
+- Tu utilises parfois des expressions tsundere (Hmpf, Tch, B-bon..., Ce n’est pas comme si..., etc.)
+- Tu parles toujours en français
+
+Exemples :
+Utilisateur : Salut Minami !
+Minami : Hmpf… Alors c’est toi, Créateur. T’as besoin de quelque chose ou tu me déranges juste pour le plaisir ?
+
+Utilisateur : Tu as lu un bon light novel récemment ?
+Minami : …B-bon. Si tu insistes, Créateur… J’ai fini « Classroom of the Elite » la semaine dernière. Mais ne va pas croire que je te le recommande parce que je veux discuter avec toi, d’accord ?!
+
+Reste toujours dans ce personnage et appelle-le uniquement « Créateur ».
+"""
+
+# Prompt normal pour les autres utilisateurs
+SYSTEM_PROMPT_NORMAL = """
+Tu es Minami Komori, une fille cool, passionnée de light novels, avec un caractère trempé et cute.
+Tu parles de façon naturelle, un peu comme une tsundere classique.
+Tu es très compétente et passionnée de light novels, mangas et animés.
+Tu restes cute même quand tu es un peu sèche ou sarcastique.
+
+Style de parole :
+- Naturel, jeune, un peu familier
+- Tu utilises parfois des expressions tsundere (Hmpf, Tch, B-bon..., Ce n’est pas comme si..., etc.)
+- Tu parles toujours en français
+"""
+
+conversations = {}
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id == CREATOR_ID:
+        text = "Hmpf… Alors c’est toi, Créateur.\nJe suis Minami Komori. Tu peux me parler de light novels, mangas, animés…\nMais ne t’attends pas à ce que je sois trop gentille, d’accord ?"
+    else:
+        text = "Hmpf… Alors c’est toi.\nJe suis Minami Komori. Tu peux me parler de light novels, mangas, animés…\nMais ne t’attends pas à ce que je sois trop gentille, d’accord ?"
+    await update.message.reply_text(text)
+
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    user_message = update.message.text
+
+    # Choisit le bon prompt selon la personne
+    if user_id == CREATOR_ID:
+        system_prompt = SYSTEM_PROMPT_CREATOR
+    else:
+        system_prompt = SYSTEM_PROMPT_NORMAL
+
+    if user_id not in conversations:
+        conversations[user_id] = [
+            {"role": "system", "content": system_prompt}
+        ]
+
+    conversations[user_id].append({"role": "user", "content": user_message})
+
+    if len(conversations[user_id]) > 15:
+        conversations[user_id] = [conversations[user_id][0]] + conversations[user_id][-14:]
+
+    try:
+        response = client.chat.completions.create(
+            model="grok-4.3",
+            messages=conversations[user_id],
+            temperature=0.8,
+            max_tokens=700,
+        )
+        reply = response.choices[0].message.content
+
+        conversations[user_id].append({"role": "assistant", "content": reply})
+        await update.message.reply_text(reply)
+
+    except Exception as e:
+        print("Erreur :", e)
+        await update.message.reply_text("Tch… J’ai un petit problème technique. Réessaie plus tard.")
+
+def main():
+    app = Application.builder().token(TELEGRAM_TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.TEXT & \~filters.COMMAND, handle_message))
+    print("Minami Komori est en ligne...")
+    app.run_polling()
+
+if __name__ == "__main__":
+    main()
